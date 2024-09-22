@@ -1,0 +1,885 @@
+---
+title: "Homework – Semester 2"
+subtitle: "Nonlinear and multivariate time series"
+author: "Aldo Caumo, Eleonora Fiorentino"
+date: "2024-03-24"
+output:
+  solarizeddocx::document: default
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# library(FRAPO)
+# listEx()
+# showEx("C3R1")
+
+library(tidyverse)
+library(readxl)
+library(MSwM)
+library(ggplot2)
+library(fBasics)
+library(evir)
+library(fitdistrplus)
+library(car)
+library(qqconf)
+library(zoo)
+library(locfit)
+library(logspline)
+library(extRemes)
+library(lubridate)
+library(bootCT)
+library(nonlinearTseries)
+library(MSwM)
+library(xts)
+library(tsDyn)
+library(strucchange)
+library(ismev)
+library(VineCopula)
+library(QRM)
+library(copula)
+library(broom)
+
+theme_set(theme_classic())
+set.seed(8)
+
+capm <- read_excel("Data/capm.xls", skip = 1)
+```
+
+# Exercise 1
+
+```{r}
+MSFT <- cbind(capm$MICROSOFT)
+USTB3M <- cbind(capm$USTB3M)
+SP500 <- cbind(capm$SANDP)
+```
+
+## a
+
+**Do a preliminary analysis of the excess returns (your asset + market excess returns) based on basics statistics, graphs of the distributions, QQ-plots, box-plot, bivariate scatterplot, graphs of time series, autocorrelation function, pp-plot**
+
+```{r}
+# Calculate excess returns
+MSFT_excess <- MSFT - USTB3M
+Market_excess <- SP500 - USTB3M
+```
+
+```{r fig.dim=c(8,12), dpi=300}
+par(mfrow = c(3, 2))
+MSFTRet <- timeSeries(MSFT_excess, charvec = capm$Date)
+seriesPlot(MSFTRet, title = FALSE, main = "Time serie", col = "blue")
+hist(MSFT_excess, main = "Histogram", xlab = "Excess Returns")
+boxPlot(MSFT_excess, title = FALSE, main = "Box plot", col = "blue", cex = 0.5, pch = 19)
+qqnormPlot(MSFT_excess, main = "QQ-Plot of Returns", title = FALSE, col = "blue", cex = 0.5, pch = 19)
+mtext("Microsoft Excess Returns", side = 3, line = -1, outer = TRUE)
+acf(MSFT_excess, main = "ACF of Returns", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+pacf(MSFT_excess, main = "PACF of Returns", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+```
+
+```{r fig.dim=c(8,12), dpi=300}
+par(mfrow = c(3, 2))
+MKRet <- timeSeries(Market_excess, charvec = capm$Date)
+seriesPlot(MKRet, title = FALSE, main = "Time serie", col = "blue")
+hist(Market_excess, main = "Histogram", xlab = "Excess Returns")
+boxPlot(Market_excess, title = FALSE, main = "Box plot", col = "blue", cex = 0.5, pch = 19)
+qqnormPlot(Market_excess, main = "QQ-Plot of Returns", title = FALSE, col = "blue", cex = 0.5, pch = 19)
+mtext("Market Excess Returns", side = 3, line = -1, outer = TRUE)
+acf(Market_excess, main = "ACF of Returns", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+pacf(Market_excess, main = "PACF of Returns", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+```
+
+
+```{r warning=FALSE, fig.dim=c(8,6), dpi=300}
+MSFT.Market.ret <- cbind(MSFT_excess, Market_excess)
+
+my.panel <- function(...) {
+  lines(...)
+  abline(h = 0)
+}
+
+plot(zoo(MSFT.Market.ret, as.Date(capm$Date, "%Y-%m-%d")), xlab = "Time", main = "Daily returns", panel = my.panel, col = c("black", "blue"))
+```
+
+```{r fig.dim=c(8,6), dpi=300}
+# Bivariate scatterplot
+plot(Market_excess, MSFT_excess,
+  pch = 16, col = "brown3",
+  xlab = "Market Excess Returns",
+  ylab = "Microsoft Excess Returns",
+  main = "Microsoft Excess Returns vs Market Excess Returns"
+)
+```
+
+## b
+
+**Fit one of the following extreme distribution to the excess returns (your asset + market excess returns): Weibull, log-normal, Gamma.**
+
+```{r echo=FALSE, fig.dim=c(8,4), warning=FALSE, dpi=300}
+MSFT_excess <- as.vector(MSFT_excess)
+descdist(MSFT_excess, discrete = FALSE, boot = 1000, method = "unbiased", graph = TRUE, obs.col = "darkblue", obs.pch = 16, boot.col = "orange")
+```
+
+```{r echo=FALSE, fig.dim=c(8,6), warning=FALSE, dpi=300}
+fit_weib_msft <- fitdist(MSFT_excess, "weibull")
+fit_lnorm_msft <- fitdist(MSFT_excess, "lnorm")
+fit_gamma_msft <- fitdist(MSFT_excess, "gamma")
+
+par(mfrow = c(2, 2))
+plot.legend <- c("weibull", "lnorm", "gamma")
+denscomp(list(fit_weib_msft, fit_lnorm_msft, fit_gamma_msft), legendtext = plot.legend)
+cdfcomp(list(fit_weib_msft, fit_lnorm_msft, fit_gamma_msft), legendtext = plot.legend)
+qqcomp(list(fit_weib_msft, fit_lnorm_msft, fit_gamma_msft), legendtext = plot.legend)
+ppcomp(list(fit_weib_msft, fit_lnorm_msft, fit_gamma_msft), legendtext = plot.legend)
+```
+
+Gamma
+
+```{r echo=FALSE, fig.dim=c(8,4), warning=FALSE, dpi=300}
+set.seed(534)
+fit_msft <- fitdist(MSFT_excess, distr = "gamma", method = "mle")
+
+msft_rate <- fit_msft$estimate[2]
+msft_shape <- fit_msft$estimate[1]
+
+hist(MSFT_excess, breaks = 20, col = rgb(0, 0, 255, max = 255, alpha = 125), border = F)
+hist(rgamma(136, rate = msft_rate, shape = msft_shape), breaks = 20, add = T, col = rgb(255, 0, 0, max = 255, alpha = 125), border = F)
+```
+
+```{r echo=FALSE, fig.dim=c(8,4), warning=FALSE, dpi=300}
+Market_excess <- as.vector(Market_excess)
+descdist(Market_excess, discrete = FALSE, boot = 1000, method = "unbiased", graph = TRUE, obs.col = "darkblue", obs.pch = 16, boot.col = "orange")
+```
+
+```{r echo=FALSE, fig.dim=c(8,6), warning=FALSE, dpi=300}
+fit_weib_mr <- fitdist(Market_excess, "weibull")
+fit_lnorm_mr <- fitdist(Market_excess, "lnorm")
+fit_gamma_mr <- fitdist(Market_excess, "gamma")
+
+par(mfrow = c(2, 2))
+plot.legend <- c("weibull", "lnorm", "gamma")
+denscomp(list(fit_weib_mr, fit_lnorm_mr, fit_gamma_mr), legendtext = plot.legend)
+cdfcomp(list(fit_weib_mr, fit_lnorm_mr, fit_gamma_mr), legendtext = plot.legend)
+qqcomp(list(fit_weib_mr, fit_lnorm_mr, fit_gamma_mr), legendtext = plot.legend)
+ppcomp(list(fit_weib_mr, fit_lnorm_mr, fit_gamma_mr), legendtext = plot.legend)
+```
+
+Weibull
+
+```{r echo=FALSE, fig.dim=c(8,4), warning=FALSE, dpi=300}
+set.seed(64)
+fit_mr <- fitdist(Market_excess, distr = "weibull", method = "mle")
+
+mr_scale <- fit_mr$estimate[2]
+mr_shape <- fit_mr$estimate[1]
+
+hist(Market_excess, breaks = 20, col = rgb(0, 0, 255, max = 255, alpha = 125), border = F)
+hist(rweibull(136, scale = mr_scale, shape = mr_shape), breaks = 20, add = T, col = rgb(255, 0, 0, max = 255, alpha = 125), border = F)
+```
+
+
+## c
+
+**Fit a GEV distribution to the excess return series and plot the QQ-plot, density and CDF.**
+
+```{r echo=FALSE, fig.dim=c(10,10), dpi=300}
+set.seed(15)
+par(mfrow = c(3, 1))
+plot(logspline(MSFT_excess), xlim = c(10, 40), ylim = c(0, 0.17), cex.lab = 2, font.lab = 2, xlab = "Microsoft Return Distribution")
+
+N <- 136
+ave <- matrix(NA, nrow = N, ncol = 1)
+max1 <- matrix(NA, nrow = N, ncol = 1)
+
+for (i in 1:N)
+{
+  x <- rgamma(N, rate = msft_rate, shape = msft_shape)
+
+  lines(locfit(~x), col = "grey")
+  points(mean(x), 0, col = "blue", pch = 17)
+  points(max(x), 0, col = "red", pch = 17)
+  ave[i] <- mean(x)
+  max1[i] <- max(x)
+  Sys.sleep(0.01)
+}
+
+Sys.sleep(1)
+plot(locfit(~ave), xlim = c(10, 40), ylim = c(0, 1.4), ylab = "", cex.lab = 2, font.lab = 2, xlab = "Central Distribution", col = "white")
+lines(locfit(~ave), lwd = 2, col = "blue")
+
+Sys.sleep(1)
+plot(locfit(~max1), xlim = c(10, 40), font.lab = 2, ylab = "", xlab = "Extreme Value Distribution", cex.lab = 2, col = "white")
+lines(locfit(~max1), lwd = 2, col = "red")
+```
+
+```{r fig.dim=c(8,6), dpi=300}
+MSFT_GEV <- gev.fit(MSFT_excess)
+MSFT_GEV$mle
+gev.diag(MSFT_GEV)
+```
+
+It shows the results for the estimated parameters. The shape parameter is -0.18 (ξ \< 0). So, a Weibull distribution fits the data with high likelihood.
+
+```{r fig.dim=c(8,6), dpi=300}
+Market_GEV <- gev.fit(Market_excess)
+Market_GEV$mle
+gev.diag(Market_GEV)
+```
+
+It shows the results for the estimated parameters. The shape parameter is -0.41 (ξ \< 0). So, a Weibull distribution fits the data with high likelihood.
+
+## d
+
+**Using elliptical copulas, estimate the correlation between the excess returns of your asset asset and the market excess returns.**
+
+```{r fig.dim=c(8,6), dpi=300}
+both <- cbind(MSFT_excess, Market_excess)
+pseudobs <- pobs(both)
+copuladata <- as.copuladata(pseudobs)
+pairs(copuladata)
+```
+
+```{r}
+options(digits = 2)
+corvec <- c(cor(MSFT_excess, Market_excess))
+tauvec <- c(cor(MSFT_excess, Market_excess, method = "kendall"))
+spearvec <- c(cor(MSFT_excess, Market_excess, method = "spearman"))
+
+table <- rbind(corvec, tauvec, spearvec)
+
+rownames(table) <- c("Pearson rho", "Kendall's tau", "Spearman's rho")
+colnames(table) <- "MSFT_excess, Market_excess"
+table
+```
+
+
+## e
+
+**Fit Archimedian copulas (Clayton or Weibull).**
+
+```{r}
+Ccop <- claytonCopula(dim = 2)
+Cfit <- fitCopula(Ccop, data = pseudobs)
+summary(Cfit)
+```
+
+```{r fig.dim=c(8,6), dpi=300}
+set.seed(12)
+titi <- BiCop(family = 3, par = 1.65)
+simdata <- BiCopSim(135, titi)
+
+plot(simdata, col = "blue", pch = 16, xlab = quote(X[1]), ylab = quote(X[2]))
+points(pseudobs, col = "brown3", pch = 16)
+legend("bottomright", c("Observed", "Simulated"), col = c("brown3", "blue"), pch = 16)
+```
+
+
+
+# Exercise 2
+
+We consider a market economy containing $N$ financial assets, and we denote by $E(R_{it})$ the expected log-return on the $i$-th asset on day $t$. For the purposes of the present discussion, we assume the existence of a market portfolio, and we denote by $R_{mt}$ its expected log-return on day $t$. Finally, we also assume the existence of lending and borrowing at the same risk-free rate which we denote by $R_{ft}$, and which we assume to be deterministic. The Sharpe-Lintner version of the CAPM states that the excess return (over the risk-free rate) of each asset $i$ is, up to noise, a linear function of the excess return of the market portfolio. In other words, for each $i$:
+
+$$
+E(R_{it})-R_{ft}=α_i+β_i(L)[E(R_{mt})-R_{ft}]+ε_{it}
+$$
+
+In order to test the CAPM, we consider the daily returns on GE stocks. We use the S&P 500 index as a proxy for the market portfolio, and we use the yield on the 3-month US Treasury bond as a proxy for the risk-free rate of borrowing from which the excess returns are computed.
+
+```{r}
+GE <- cbind(capm$GE)
+GE_excess <- GE - USTB3M
+```
+
+```{r fig.dim=c(8,6), dpi=200}
+plot(Market_excess, GE_excess, pch = 16, col = "brown3", xlab="Risk Premium", ylab="Microsoft")
+abline(lm(GE_excess ~ Market_excess), col="blue", lwd=1.5)
+```
+
+## 1
+
+**Estimate the above equation using a Markov-switching model with 2 regimes:**
+
+### a.
+
+**Estimate the linear model and use tests on residuals to show that the dynamics is probably nonlinear.**
+
+Just to visualize it again, we start by plotting MSFT ts:
+
+```{r}
+GE.xts <-xts(capm$GE, order.by = capm$Date)
+
+plot(GE.xts)
+
+RGE.xts =diff(log(GE.xts),lag=1,differences=1)   # taking the 1st-difference
+
+RGE.xts=na.omit(RGE.xts)
+```
+
+Then we start calculating the actual linear model
+
+```{r}
+GE.fit <- lm(GE_excess ~ Market_excess, data = capm)
+
+summary(GE.fit)
+```
+
+We can notice that there is a poor linear adjustment (low Adj R², 0.4)
+
+```{r}
+model.diag.metrics <- augment(GE.fit)
+head(model.diag.metrics)
+```
+
+Let's do some diagnostic plots
+
+```{r}
+par(mfrow = c(2, 2))
+plot(GE.fit)
+```
+
+The linearity assumption can be checked by inspecting the Residuals vs Fitted plot (1st plot):
+
+```{r}
+plot(GE.fit, 1)
+```
+
+This plot clearly shows that our points are not iid/white noise (in fact they are mostly not near the line but spread all around)
+
+Variance homogeneity can be checked by examining the scale-location plot, also known as the spread-location plot.
+
+```{r}
+plot(GE.fit, 3)
+```
+
+This plot shows if residuals are spread equally along the ranges of predictors. It’s good if you see a horizontal line with equally spread points. In our example, this is not the case. This suggests non-constant variances in the residuals errors (or heteroscedasticity).
+
+Let's now see if there's a non-linearity problem:
+
+```{r}
+resu<-GE.fit$residuals
+nonlinearityTest(resu,verbose=TRUE)
+```
+
+According to the output:
+
+-   Teraesvirta's Neural Network Test: examines the null hypothesis that the mean of the time series behaves linearly. The low p-value suggests strong evidence to reject this null hypothesis, indicating the presence of nonlinearity in the mean behavior of the time series.
+-   White Neural Network Test: similar to Teraesvirta's test, this also assesses the linearity in the mean of the time series. The low p-value provides further evidence against linearity, consistent with the previous test.
+-   Keenan's One-Degree Test for Nonlinearity: This test investigates whether the time series follows an autoregressive (AR) process, implying linearity. The high p-value (0.698) suggests no significant evidence to reject the null hypothesis, indicating that the time series may behave linearly.
+-   McLeod-Li Test: This test assesses whether the time series follows an autoregressive integrated moving average (ARIMA) process, implying linearity. The extremely low maximum p-value strongly suggests rejection of the null hypothesis, indicating nonlinearity in the time series.
+-   Tsay's Test for Nonlinearity: Similar to Keenan's test, Tsay's test evaluates whether the time series follows an AR process.
+-   Likelihood Ratio Test for Threshold Nonlinearity: This test explores whether the time series follows a threshold autoregressive (TAR) process instead of a simple AR process. The borderline p-value (0.0660172) suggests weak evidence against the null hypothesis of linearity.
+
+In summary, while some tests indicate evidence of nonlinearity (Teraesvirta's and White's tests, McLeod-Li test), others (Keenan's and Tsay's tests) suggest no strong evidence against linearity. The Likelihood Ratio Test provides however somewhat evidence of nonlinearity.
+
+### b.
+
+**Fit a Markov-switching model (select the optimal lag structure using tests based on information criteria).**
+
+Let's start with a basic msm with no lags:
+
+```{r}
+msm <- msmFit(GE.fit, k = 2, sw =  c(TRUE,TRUE,TRUE))
+summary(msm)
+```
+
+Now we select the best lag structure for the msm:
+
+First we need to calculate all the lagged version of the variable `GE_excess`
+
+```{r}
+matrix <- cbind(GE_excess, Market_excess, lag_mts(X = Market_excess, k = 10))
+colnames(matrix) <- c("y", "X", "lag1", "lag2", "lag3", "lag4", "lag5", "lag6", "lag7", "lag8", "lag9", "lag10")
+#matrix
+```
+
+Selecting the best lag:
+
+```{r}
+model_names <- character()
+aic_values <- numeric()
+
+# Loop through different numbers of lag 
+for (i in 1:10) {
+  # Formulate the formula string
+  formula_str <- paste("y ~ X", paste0("+ lag", 1:i, collapse = ""), sep = " + ")
+  
+  # Fit the model
+  model <- lm(formula_str, data = matrix)
+  
+  # Fit the msm model
+  msm <- msmFit(model, k = 2, sw = rep(TRUE, i + 3))  # sw length: i coefficients + 1 intercept + 1 regime
+  
+  # Calculate AIC
+  aic <- AIC(msm)
+  
+  # Store model name and AIC value
+  model_names <- c(model_names, paste0("lag", i))
+  aic_values <- c(aic_values, aic)
+}
+
+# Create a data frame with model names and their AIC values
+aic_table <- data.frame(Model = model_names, AIC = aic_values)
+
+# Print the data frame
+print(aic_table)
+```
+
+The best model is the one with 8 lags. We will now fit this model:
+
+```{r}
+bestModel <- lm(y ~ X + lag1 + lag2 + lag3+ lag4+ lag5+ lag6+ lag7+ lag8, data = matrix)
+msm1 = msmFit(bestModel, k = 2, sw = rep(TRUE, 11))
+summary(msm1)
+```
+
+The transition probabilities describe the likelihood that the current regime stays the same or changes (i.e the probability that the regime transitions to another regime). Looking at the transition probabilities of this model, we notice that we have two distinct absorbent regimes, which means that, once you fall into one of the two, there is a high probability that you will remain in that specific regime.
+
+### c.
+
+**Plot graphs of the posterior probabilities of each regime.**
+
+```{r fig.dim=c(8,6), dpi=200}
+par(mar=c(3,3,3,3))
+plotProb(msm1, which=1)
+```
+
+```{r}
+par(mar = c(1, 1, 1, 1))
+plotProb(msm1, which=2)
+```
+
+```{r}
+par(mar = c(1, 1, 1, 1))
+plotProb(msm1, which=3)
+```
+
+### d.
+
+**Comment your findings.**
+
+In regime 1 there is a clear positive trend, while in regime 2 we observe higher values and a changing trend (positive at the beginning and negative in a second time).
+
+## 2
+
+**We wish to apply a STAR model to the excess return on assets, the transition variable being the market excess return delayed by one or more periods (to be determined). After applying the appropriate tests, estimate an ESTAR or LSTAR model. Make a graphical representation of the transition function. Comment on your results.**
+
+First we calculate the star model:
+
+```{r}
+star_mod<- star(GE_excess, thVar = Market_excess, control=list(maxit=3000))
+summary(star_mod)
+```
+This produces some unclear results: in fact, if we do a linearity test, the output is:
+
+```{r}
+library(tseries)
+resid<-residuals(star_mod)
+epsilon<-na.omit(resid)
+nonlinearityTest(epsilon,verbose=TRUE)
+```
+As we can see, the p-value of the Teraesvirta's neural network test is very low (0.035) and so we reject the null hypothesis of linearity.
+
+Because the p-value is < 0.05, we choose a LSTAR model.
+
+```{r}
+lstar_mod=lstar(GE_excess, thVar = Market_excess, mL=5, mH=5, thDelay=5, control=list(maxit=3000))
+summary(lstar_mod)
+```
+
+Finally, we plot the transition function for the lstar model:
+
+```{r}
+op=par(mfrow=c(1,1)) 
+
+gamma1=9.4
+
+curve(1/(1+exp(-gamma1*x)), -5, 5, col="red", xlab="y(t-d)-c", 
+ylab="F()",main="Logistic") 
+leg.txt<-c("gamma = 9.4") 
+legend("bottomright",inset=.01,legend= leg.txt,lty=1:3,col=c(2,3,4),lwd=2) 
+par(op)
+```
+
+# Exercise 3
+
+Loading the data
+
+```{r}
+bonds <-read_xls('Data/base_bond_equity.xls',sheet='Bonds')
+```
+
+```{r}
+bonds<- na.omit(bonds)
+
+Spread_FI<-bonds[,c('Date...3',"France, Government Benchmarks, Macrobond, 10 Year, Yield","Belgium, Government Benchmarks, Bank of Belgium, 10 Year, Yield","Germany, Government Benchmarks, Macrobond, 10 Year, Yield")]
+colnames(Spread_FI)<-c('Date','Yield_Fr','Yield_Be','Yield_Ge')
+Spread_FI$Spread_Fr<-Spread_FI$Yield_Fr-Spread_FI$Yield_Ge
+Spread_FI$Spread_Be<-Spread_FI$Yield_Be-Spread_FI$Yield_Ge
+
+Spread_FI <- Spread_FI %>%
+  arrange(Date)
+```
+
+
+## 3
+
+Estimate the above equation using a Markov-switching model with 2 regimes
+
+### a.
+
+Estimate the linear model and use tests on residuals to show that the dynamics is probably nonlinear.
+
+
+```{r}
+lm1=lm(Spread_Fr~Spread_Be, data =Spread_FI)
+summary(lm1)
+```
+
+The R-squared is not so good: let's do some diagnostic plots
+
+```{r}
+par(mfrow=c(2,2))
+plot(lm1)
+```
+
+From the Q-Q plot it's clear that we have a linearity problem, especially with the tails. This graph suggests that there may be some heteroskedasticity in our data.
+
+```{r}
+pacf(residuals(lm1))
+```
+
+When considering the results of all these tests, they suggest that the assumption of linearity in the average of the residuals does not hold. This indicates the possible existence of nonlinear patterns within the time series data. Consequently, it appears that a simple linear model may not adequately explain the relationship present in the data, implying the necessity of employing a more sophisticated modeling approach.
+
+
+### b.
+
+Fit a Markov-switching model (select the optimal lag structure using tests based on information criteria).
+
+We start with a simple model without lags:
+
+```{r}
+msm=msmFit(lm1,k=2,sw=c(TRUE,TRUE,TRUE),control=list(parallel=FALSE))
+summary(msm)
+```
+
+Again we have an absorbing state, which is not the best for us as it can lead to the model becoming trapped in this state, thereby limiting its ability to accurately capture transitions between different regimes or states over time.
+
+The lag creation:
+
+```{r}
+matrix1 <- cbind(Spread_FI$Spread_Fr, Spread_FI$Spread_Be, lag_mts(X = Spread_FI$Spread_Be, k = 10))
+colnames(matrix1) <- c("y", "X", "lag1", "lag2", "lag3", "lag4", "lag5", "lag6", "lag7", "lag8", "lag9", "lag10")
+matrix1=na.omit(matrix1)
+```
+
+Now we would like to select the model with the smallest AIC
+
+
+```{r}
+model_names <- character()
+aic_values <- numeric()
+
+# Loop through different numbers of lag 
+for (i in 1:10) {
+  # Formulate the formula string
+  formula_str <- paste("y ~ X", paste0("+ lag", 1:i, collapse = ""), sep = " + ")
+  
+  # Fit the model
+  model <- lm(formula_str, data = matrix1)
+  
+  # Fit the msm model
+  msm <- msmFit(model, k = 2, sw = rep(TRUE, i + 3))
+  
+  # Calculate AIC
+  aic <- AIC(msm)
+  
+  # Store model name and AIC value
+  model_names <- c(model_names, paste0("lag", i))
+  aic_values <- c(aic_values, aic)
+}
+
+# Create a data frame with model names and their AIC values
+aic_table <- data.frame(Model = model_names, AIC = aic_values)
+
+# Print the data frame
+print(aic_table)
+```
+
+We will choose the model with 5 lags, as it has one of the smallest AIC with the smallest computational cost (and time).
+
+```{r}
+BestModel5<-lm(y~X+lag1+lag2+lag3+lag4+lag5,data=matrix1)
+msm5=msmFit(BestModel5,k=2,sw=rep(TRUE,8),control=list(parallel=FALSE))
+summary(msm5)
+```
+
+
+### c.
+
+Plot graphs of the posterior probabilities of each regime
+
+```{r fig.dim=c(8,6), dpi=200}
+par(mar=c(3,3,3,3))
+plotProb(msm5, which=1)
+```
+
+
+```{r}
+par(mar = c(1, 1, 1, 1))
+plotProb(msm5, which=2)
+```
+
+```{r}
+par(mar = c(1, 1, 1, 1))
+plotProb(msm5, which=3)
+```
+
+### d.
+
+Comment your findings.
+
+Regime 2 is characterized by growth, whereas regime 1 appears to be relatively stable or possibly even declining. Given this observation, we think it might be useful to try introducing a third regime into the model, to provide a more meaningful explanation of the varying phases observed within the data. This additional regime could help to better capture the complexity and dynamics of the underlying processes driving the observed patterns.
+
+
+## 4
+
+We wish to apply a STAR model to the excess return on assets, the transition variable being the market excess return delayed by one or more periods (to be determined). After applying the appropriate tests, estimate an ESTAR or LSTAR model. Make a graphical representation of the transition function. Comment on your results.
+
+First we need to calculate the excess return, as we did in the previous points:
+
+```{r}
+Excess_return_France<-na.omit(Spread_FI$Yield_Fr-Spread_FI$Yield_Ge)
+Excess_return_Market<-na.omit(Spread_FI$Yield_Be-Spread_FI$Yield_Fr)
+```
+
+Then we calculate the star model:
+
+```{r}
+star_mod<- star(Excess_return_France, thVar = Excess_return_Market, control=list(maxit=3000))
+summary(star_mod)
+```
+
+This produced a star model with 10 regimes. The next step is to test the residuals in order to choose between a LSTAR or ESTAR model
+
+
+```{r}
+library(tseries)
+resid<-residuals(star_mod)
+epsilon<-na.omit(resid)
+nonlinearityTest(epsilon,verbose=TRUE)
+```
+
+Based on the Terasvirta's neural network test results, where the p-value is 0.23, we cannot reject the null hypothesis of linearity in the mean. This suggests that there is no significant evidence to support the presence of nonlinearity in the mean of the residuals.
+
+In this case, since the test does not provide evidence against linearity, it is more appropriate to consider an ESTAR (Smooth Transition Autoregressive) model rather than an LSTAR (Threshold Autoregressive) model.
+
+An ESTAR model is suitable when the data suggests a smooth transition between different regimes, while an LSTAR model is preferred when there is evidence of threshold nonlinearity. 
+
+Let's estimate now the ESTAR model:
+
+```{r}
+#estar_mod <- ...
+#summary(estar_mod)
+```
+
+
+Finally, we plot the transition function for the estar model:
+
+```{r}
+op=par(mfrow=c(1,1)) 
+gamma1=1
+gamma2=3
+curve(1-exp(-1*x^2),-5,5, col="red", xlab="y(t-d)-c", 
+ylab="F()",main="Exponential") 
+curve(1-exp(-gamma2*x^2), -5, 5, add=TRUE, col="green",lty="dotted",lwd=2) 
+leg.txt<-c("gamma = 1","gamma = 3") 
+legend("bottomright",inset=.01,legend= leg.txt,lty=1:3,col=c(2,3,4),lwd=2) 
+par(op)
+```
+```{r}
+
+ 
+```
+
+
+## 5
+
+Use a bivariate GARCH model to study the correlation between excess return of your assets
+and excess return on the market. Comment on your results.
+
+```{r}
+library(rugarch)
+library(rmgarch)
+library(quantmod)
+```
+
+
+Univariate Garch Series
+
+```{r}
+model1=ugarchspec(mean.model = list(armaOrder=c(0,0)), variance.model =list(garchOrder=c(1,1), model='sGARCH'), distribution.model = 'norm' )
+modelspec=dccspec(uspec=multispec(replicate(2, model1)), dccOrder =c(1,1),distribution = 'mvnorm')
+modelfit=dccfit(modelspec, data=data.frame(Excess_return_France,Excess_return_Market))
+modelfit
+```
+All the parameters are significant, in particular beta1 (representative of the Garch model)
+
+# Exercise 4
+
+Now, we wish to model the correlation between the spreads of countries i and j using copulas.
+
+### a. 
+Do a preliminary analysis of the spreads based on basics statistics, graphs of the distributions, QQ-plots, box-plot, bivariate scatterplot, graphs of time series, autocorrelation function, pp-plot.
+
+```{r fig.dim=c(8,12), dpi=300}
+par(mfrow = c(3, 2))
+FRANCERet <- timeSeries(Spread_FI$Spread_Fr, charvec = Spread_FI$Date)
+seriesPlot(FRANCERet, title = FALSE, main = "Time serie", col = "blue")
+hist(Spread_FI$Spread_Fr, main = "Histogram", xlab = "France Yield")
+boxPlot(Spread_FI$Spread_Fr, title = FALSE, main = "Box plot", col = "blue", cex = 0.5, pch = 19)
+qqnormPlot(Spread_FI$Spread_Fr, main = "QQ-Plot of France Yield", title = FALSE, col = "blue", cex = 0.5, pch = 19)
+mtext("France Yield", side = 3, line = -1, outer = TRUE)
+acf(Spread_FI$Spread_Fr, main = "ACF of France Yield", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+pacf(Spread_FI$Spread_Fr, main = "PACF of France Yield", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+```
+
+```{r fig.dim=c(8,12), dpi=300}
+par(mfrow = c(3, 2))
+BERet <- timeSeries(Spread_FI$Spread_Be, charvec = Spread_FI$Date)
+seriesPlot(BERet, title = FALSE, main = "Time serie", col = "blue")
+hist(Spread_FI$Spread_Be, main = "Histogram", xlab = "Belgium Yield")
+boxPlot(Spread_FI$Spread_Be, title = FALSE, main = "Box plot", col = "blue", cex = 0.5, pch = 19)
+qqnormPlot(Spread_FI$Spread_Be, main = "QQ-Plot of Belgium Yield", title = FALSE, col = "blue", cex = 0.5, pch = 19)
+mtext("Belgium Yield", side = 3, line = -1, outer = TRUE)
+acf(Spread_FI$Spread_Be, main = "ACF of Belgium Yield", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+pacf(Spread_FI$Spread_Be, main = "PACF of Belgium Yield", lag.max = 20, ylab = "", xlab = "", col = "blue", ci.col = "red")
+```
+
+```{r warning=FALSE, fig.dim=c(8,6), dpi=300}
+FrBe.Market.ret <- cbind(Spread_FI$Spread_Fr,Spread_FI$Spread_Be)
+
+my.panel <- function(...) {
+  lines(...)
+  abline(h = 0)
+}
+
+plot(zoo(FrBe.Market.ret , as.Date(capm$Date, "%Y-%m-%d")), xlab = "Time", main = "Spread", panel = my.panel, col = c("black", "blue"))
+```
+
+```{r fig.dim=c(8,6), dpi=300}
+# Bivariate scatterplot
+plot(Spread_FI$Spread_Fr, Spread_FI$Spread_Be,
+  pch = 16, col = "brown4",
+  xlab = "Spread Fr",
+  ylab = "Spread Be",
+  main = "Spread Fr vs Spread Be"
+)
+```
+
+### b.
+Fit one of the following extreme distribution to the spreads: Weibull, log-norma, Gamma.
+
+France spread:
+
+```{r eval=FALSE, fig.dim=c(8,6), warning=FALSE, dpi=300, include=FALSE}
+fit_weib_fr <- fitdist(Spread_FI$Spread_Fr+0.5, "weibull")
+fit_lnorm_fr <- fitdist(Spread_FI$Spread_Fr+0.5, "lnorm")
+fit_gamma_fr <- fitdist(Spread_FI$Spread_Fr+0.5, "gamma")
+```
+
+
+```{r eval=FALSE, fig.dim=c(8,6), warning=FALSE, dpi=300, include=FALSE}
+par(mfrow = c(2, 2))
+plot.legend <- c("weibull", "lnorm", "gamma")
+denscomp(list(fit_weib_fr, fit_lnorm_fr, fit_gamma_fr), legendtext = plot.legend)
+cdfcomp(list(fit_weib_fr, fit_lnorm_fr, fit_gamma_fr), legendtext = plot.legend)
+qqcomp(list(fit_weib_fr, fit_lnorm_fr, fit_gamma_fr), legendtext = plot.legend)
+ppcomp(list(fit_weib_fr, fit_lnorm_fr, fit_gamma_fr), legendtext = plot.legend)
+```
+
+The lognormal distribution is the one that fits better the data of the french spread.
+
+Belgium spread:
+
+```{r fig.dim=c(8,6), warning=FALSE, dpi=300, include=FALSE}
+fit_weib_be <- fitdist(Spread_FI$Spread_Be+0.5, "weibull")
+fit_lnorm_be <- fitdist(Spread_FI$Spread_Be+0.5, "lnorm")
+fit_gamma_be <- fitdist(Spread_FI$Spread_Be+0.5, "gamma")
+```
+
+
+```{r fig.dim=c(8,6), warning=FALSE, dpi=300, include=FALSE}
+par(mfrow = c(2, 2))
+plot.legend <- c("weibull", "lnorm", "gamma")
+denscomp(list(fit_weib_be, fit_lnorm_be, fit_gamma_be), legendtext = plot.legend)
+cdfcomp(list(fit_weib_be, fit_lnorm_be, fit_gamma_be), legendtext = plot.legend)
+qqcomp(list(fit_weib_be, fit_lnorm_be, fit_gamma_be), legendtext = plot.legend)
+ppcomp(list(fit_weib_be, fit_lnorm_be, fit_gamma_be), legendtext = plot.legend)
+```
+
+For the belgium spread the gamma distribution is the one that fits better the data.
+
+### c.
+Fit a GEV distribution to the excess return series and plot the QQ-plot, density and CDF.
+
+For France:
+
+```{r fig.dim=c(8,6), dpi=300}
+FR_GEV <- gev.fit(Spread_FI$Spread_Fr)
+FR_GEV$mle
+gev.diag(FR_GEV)
+```
+
+It shows the results for the estimated parameters. The shape parameter is -0.54 (ξ \< 0). So, a Weibull distribution fits the data with high likelihood.
+
+For Belgium:
+
+```{r fig.dim=c(8,6), dpi=300}
+BE_GEV <- gev.fit(Spread_FI$Spread_Be)
+BE_GEV$mle
+gev.diag(BE_GEV)
+```
+
+It shows the results for the estimated parameters. The shape parameter is -0.33 (ξ \< 0). So, a Weibull distribution fits the data with high likelihood.
+
+### d.
+Using elliptical copulas, estimate the correlation between the excess returns of your asset and the market excess returns.
+
+```{r}
+acf <- Spread_FI$Spread_Fr
+acv <- Spread_FI$Spread_Be
+acc <- Spread_FI$Yield_Ge
+options(digits=2)
+corvec<-c(cor(acf,acv),cor(acf,acc),
+cor(acv,acc))
+tauvec<-c(cor(acf,acv,method="kendall"),
+cor(acf,acc,method="kendall"),
+cor(acv,acc,method="kendall"))
+spearvec<-c(cor(acf,acv,method="spearman"),
+cor(acf,acc,method="spearman"),
+cor(acv,acc,method="spearman"))
+table<-rbind(corvec,tauvec,spearvec)
+rownames(table)<-c("Pearson rho","Kendall's tau", "Spearman's rho")
+colnames(table)<-c("(France, Belgium)","(France, Germany)","(Belgium, Germany)")
+table
+```
+
+
+### e.
+Fit Archimedian copulas (Clayton or Weibull).
+
+```{r}
+both <- cbind(Spread_FI$Spread_Fr, Spread_FI$Spread_Be)
+pseudobs <- pobs(both)
+Ccop <- claytonCopula(dim = 2)
+Cfit <- fitCopula(Ccop, data = pseudobs)
+summary(Cfit)
+```
+
+```{r fig.dim=c(8,6), dpi=300}
+set.seed(12)
+titi <- BiCop(family = 3, par = 1.65)
+simdata <- BiCopSim(135, titi)
+
+plot(simdata, col = "blue", pch = 16, xlab = quote(X[1]), ylab = quote(X[2]))
+points(pseudobs, col = "brown3", pch = 16)
+legend("bottomright", c("Observed", "Simulated"), col = c("brown3", "blue"), pch = 16)
+```
+
